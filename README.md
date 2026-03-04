@@ -59,6 +59,15 @@ node scripts/note-edit.js --action=publish \
   --url="https://note.com/username/n/xxxxxxxx"
 ```
 
+## 動作確認環境
+
+| 項目 | バージョン |
+|------|-----------|
+| OS | Ubuntu 24.04 LTS (WSL2) |
+| Node.js | v20.20.0 |
+| Playwright | 1.58.2 |
+| Chromium | Playwright同梱版 |
+
 ## 制限事項
 
 - **headedモード専用**: ブラウザウィンドウが表示される環境が必要です
