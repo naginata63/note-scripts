@@ -587,17 +587,17 @@ async function applyInlineContent(page, text) {
       // Ctrl+K correctly opens the inline URL input while preserving the selection.
       await page.keyboard.press('Control+k');
       await page.waitForTimeout(500);
-      // Scroll up to ensure the popover is in the viewport, then wait for URL input
-      await page.evaluate(() => window.scrollBy(0, -500));
+      // Wait for URL input and scroll it into view using element handle (avoids viewport issues)
       const linkInput = await page.waitForSelector('textarea[placeholder="https://"]', { timeout: 5000 });
       await linkInput.scrollIntoViewIfNeeded();
-      await page.click('textarea[placeholder="https://"]');
+      await linkInput.click();
       await page.waitForTimeout(200);
       await page.keyboard.type(seg.url);
       // Click the "適用" (Apply) button to confirm the inline link.
       // Note: pressing Enter in the textarea inserts a newline, NOT submit.
-      await page.waitForSelector('button:has-text("適用")', { timeout: 3000 });
-      await page.click('button:has-text("適用")');
+      const applyBtn = await page.waitForSelector('button:has-text("適用")', { timeout: 3000 });
+      await applyBtn.scrollIntoViewIfNeeded();
+      await applyBtn.click();
       await page.waitForTimeout(500);
       // Move cursor past the link to deselect
       await page.keyboard.press('ArrowRight');
