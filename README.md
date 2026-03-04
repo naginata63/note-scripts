@@ -59,6 +59,33 @@ node scripts/note-edit.js --action=publish \
   --url="https://note.com/username/n/xxxxxxxx"
 ```
 
+### Markdown記法で下書き作成
+
+`--body-file` で Markdownファイルを指定すると、noteエディタ上でリッチテキストに自動変換されます。
+
+```bash
+node scripts/note-edit.js --action=create \
+  --title="記事タイトル" \
+  --body-file=article.md
+```
+
+#### 対応するMarkdown記法
+
+| 記法 | 変換結果 |
+|------|---------|
+| `## 見出し` | h2見出し |
+| `### 見出し` | h3見出し |
+| `**太字**` | **太字** |
+| `[テキスト](URL)` | リンク |
+| `> 引用` | 引用ブロック |
+| `- 箇条書き` | 箇条書きリスト |
+| `` `コード` `` | コードブロック |
+| 空行 | 段落区切り |
+
+※ テーブル記法はnote非対応のため自動スキップされます（警告メッセージ表示）。
+
+![Markdown変換デモ](images/markdown_demo.png)
+
 ## 動作確認環境
 
 | 項目 | バージョン |
