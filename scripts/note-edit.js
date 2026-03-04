@@ -40,8 +40,8 @@ async function main() {
   if (!action) {
     console.error('Usage: node note-edit.js --action=<login|create|edit|publish|list> [options]');
     console.error('  login:   手動ログイン（初回またはセッション切れ時）');
-    console.error('  create:  --title="..." [--body="..." | --body-file="path/to/file.md"]');
-    console.error('  edit:    --url="https://note.com/xxx/n/yyy" [--body="..." | --body-file="path/to/file.md"]');
+    console.error('  create:  --title="..." [--body="..." | --body-file="path/to/file.md"] [--image-file="path/to/image.png"]');
+    console.error('  edit:    --url="https://note.com/xxx/n/yyy" [--body="..." | --body-file="path/to/file.md"] [--image-file="path/to/image.png"]');
     console.error('  publish: --url="https://note.com/xxx/n/yyy"');
     console.error('  list:    [--username=naginata63]');
     console.error('');
@@ -71,6 +71,9 @@ async function main() {
         } else {
           await createDraft(page, args.title || '', args.body || '');
         }
+        if (args['image-file']) {
+          await uploadImage(page, args['image-file']);
+        }
         break;
       case 'edit':
         if (!args.url) { console.error('Error: --url is required for edit'); process.exit(1); }
@@ -80,6 +83,9 @@ async function main() {
           await editNote(page, args.url, '', { markdownContent: mdContent });
         } else {
           await editNote(page, args.url, args.body || '');
+        }
+        if (args['image-file']) {
+          await uploadImage(page, args['image-file']);
         }
         break;
       case 'publish':
@@ -738,6 +744,86 @@ async function applyMarkdownToEditor(page, markdownText) {
 
     }
     // Empty lines: skipped (Enter×2 after paragraph text provides sufficient block separation)
+  }
+}
+
+/**
+ * uploadImage(page, imagePath)
+ * Upload an image file to the note editor via the toolbar image button.
+ * Uses the file chooser API (Playwright) to set the file via the toolbar's image insert button.
+ *
+ * Flow:
+ *   1. Click toolbar button[aria-label="画像"] → triggers file chooser dialog
+ *   2. Set image file via fileChooser.setFiles()
+ *   3. Wait for upload completion (image appears in editor)
+ *
+ * Falls back to direct input[type="file"] injection if file chooser event is not triggered.
+ */
+async function uploadImage(page, imagePath) {
+  const path = require('path');
+  const absPath = path.resolve(imagePath);
+
+  if (!fs.existsSync(absPath)) {
+    console.error(`[image] ファイルが見つかりません: ${absPath}`);
+    return;
+  }
+
+  console.log('[image] 画像アップロード開始:', absPath);
+
+  // Ensure we are on the editor page
+  if (!page.url().includes('editor.note.com')) {
+    console.log('[image] エディタページではありません。スキップします。URL:', page.url());
+    return;
+  }
+
+  // Click ProseMirror to ensure focus (cursor must be in editor for image insertion)
+  await page.click('.ProseMirror');
+  await page.waitForTimeout(500);
+
+  // Strategy 1: Wait for file chooser before clicking the toolbar image button
+  try {
+    const [fileChooser] = await Promise.all([
+      page.waitForEvent('filechooser', { timeout: 8000 }),
+      page.click('button[aria-label="画像"]'),
+    ]);
+    await fileChooser.setFiles(absPath);
+    console.log('[image] ファイル選択完了 (filechooser)');
+  } catch (err) {
+    console.log('[image] filechooserイベントが取得できませんでした。直接input[type="file"]を試みます:', err.message);
+
+    // Strategy 2: direct input[type="file"] injection
+    try {
+      await page.click('button[aria-label="画像"]');
+      await page.waitForTimeout(1000);
+      const fileInput = await page.$('input[type="file"]');
+      if (fileInput) {
+        await fileInput.setInputFiles(absPath);
+        console.log('[image] ファイル選択完了 (direct input)');
+      } else {
+        console.log('[image] input[type="file"]が見つかりませんでした。手動で画像を挿入してください。');
+        return;
+      }
+    } catch (err2) {
+      console.log('[image] 画像アップロード自動化断念。手動挿入が必要です:', err2.message);
+      return;
+    }
+  }
+
+  // Wait for upload to complete (image should appear in editor as <img> or figure)
+  try {
+    await page.waitForSelector('.ProseMirror img, .ProseMirror figure', { timeout: 15000 });
+    console.log('[image] 画像アップロード完了');
+  } catch (_) {
+    console.log('[image] 画像挿入の確認がタイムアウト。アップロードは試みましたが確認できませんでした。');
+  }
+
+  // Save draft after image upload
+  await page.waitForTimeout(1000);
+  const saveBtn = await page.$('button:has-text("下書き保存")');
+  if (saveBtn) {
+    await saveBtn.click({ force: true });
+    await page.waitForTimeout(2000);
+    console.log('[image] 画像挿入後の下書き保存完了');
   }
 }
 
