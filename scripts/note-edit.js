@@ -581,8 +581,10 @@ async function applyInlineContent(page, text) {
       // Ctrl+K correctly opens the inline URL input while preserving the selection.
       await page.keyboard.press('Control+k');
       await page.waitForTimeout(500);
-      // Wait for URL input popover (textarea[placeholder="https://"])
-      await page.waitForSelector('textarea[placeholder="https://"]', { timeout: 3000 });
+      // Scroll up to ensure the popover is in the viewport, then wait for URL input
+      await page.evaluate(() => window.scrollBy(0, -500));
+      const linkInput = await page.waitForSelector('textarea[placeholder="https://"]', { timeout: 5000 });
+      await linkInput.scrollIntoViewIfNeeded();
       await page.click('textarea[placeholder="https://"]');
       await page.waitForTimeout(200);
       await page.keyboard.type(seg.url);
@@ -627,11 +629,37 @@ async function applyMarkdownToEditor(page, markdownText) {
   const lines = markdownText.split('\n');
   let inList = false;
   let inQuote = false;
+  let inCodeBlock = false;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
 
-    if (line.startsWith('## ')) {
+    if (line === '```' || line.startsWith('```')) {
+      // Code block toggle
+      if (inCodeBlock) {
+        // Closing ```: press Enter×2 to exit code block
+        await page.keyboard.press('Enter');
+        await page.keyboard.press('Enter');
+        inCodeBlock = false;
+      } else {
+        // Opening ```: exit any active block first
+        if (inList) { await page.keyboard.press('Enter'); inList = false; }
+        if (inQuote) { await page.keyboard.press('Enter'); inQuote = false; }
+        // Type ``` to trigger ProseMirror code block input rule
+        await page.keyboard.type('```');
+        await page.waitForTimeout(200);
+        inCodeBlock = true;
+      }
+
+    } else if (inCodeBlock) {
+      // Inside code block: type the line as-is and press Enter
+      await page.keyboard.type(line);
+      await page.keyboard.press('Enter');
+
+    } else if (line.trim() === '---' || line.trim() === '***') {
+      // Horizontal rule: skip (ProseMirror would convert to a black thick line)
+
+    } else if (line.startsWith('## ')) {
       // H2 heading: input rule fires on "## " → Enter exits heading to new paragraph
       if (inList) { await page.keyboard.press('Enter'); inList = false; }
       if (inQuote) { await page.keyboard.press('Enter'); inQuote = false; }
