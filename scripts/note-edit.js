@@ -975,6 +975,17 @@ async function setCoverImage(page, imagePath) {
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.waitForTimeout(1000);
 
+  // 既存のカバー画像がある場合は削除ボタン（aria-label="削除"）をクリック
+  const existingCover = await page.$('div[data-dragging] button[aria-label="削除"]');
+  if (existingCover) {
+    const bbox = await existingCover.boundingBox();
+    if (bbox && bbox.y < 500) {
+      console.log('[cover] 既存カバー画像を削除します');
+      await existingCover.click();
+      await page.waitForTimeout(1500);
+    }
+  }
+
   // エディタ上部のカバー画像設定エリアをクリック
   // ページ上部(y<200)にある「画像を追加」ボタンがカバー画像ボタン
   await page.waitForSelector('button[aria-label="画像を追加"]', { timeout: 10000 });
