@@ -119,5 +119,3 @@ Playwrightの`launchPersistentContext`を使ってプロファイルディレク
 OSSとして公開しているので、興味があれば試してみてください。フィードバックやPRも歓迎です。
 
 https://github.com/naginata63/note-scripts
-
-![ロボットライターが記事を自動生成するイメージ](images/robot_writer.png)
