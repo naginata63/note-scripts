@@ -644,7 +644,7 @@ function parseInline(text) {
  * - Bold: type **text** literally → Tiptap input rule converts on closing **
  * - Link: type text → select → Ctrl+K → textarea[placeholder="https://"]
  *
- * Note: Ctrl+B does NOT work in note.com's editor (confirmed by testing).
+ * Note: Ctrl+B applies bold in note.com's Tiptap editor (confirmed working).
  * Note: Ctrl+K opens the inline link dialog. The toolbar aria-label="リンク" button creates
  *       link CARDS (block elements) and must NOT be used for inline links.
  */
@@ -656,9 +656,12 @@ async function applyInlineContent(page, text) {
       if (seg.content) await page.keyboard.type(seg.content);
 
     } else if (seg.type === 'bold') {
-      // Use Tiptap's markdown input rule: **text** → bold
-      // The rule fires when the second * of closing ** is typed
-      await page.keyboard.type(`**${seg.content}**`);
+      // Use Ctrl+B shortcut (confirmed working in note.com's Tiptap editor)
+      await page.keyboard.press('Control+b');
+      await page.waitForTimeout(100);
+      await page.keyboard.type(seg.content);
+      await page.keyboard.press('Control+b'); // toggle off
+      await page.waitForTimeout(100);
 
     } else if (seg.type === 'link') {
       // Type link text first
@@ -720,7 +723,7 @@ async function applyInlineContent(page, text) {
  *   - Enter in paragraph → <br> (line break, NOT new paragraph)
  *   - Enter after <br> (empty position) → new paragraph block
  *   - Enter in heading → new paragraph (standard Tiptap heading behavior)
- *   - Ctrl+B does NOT apply bold in this editor
+ *   - Ctrl+B applies bold in this editor (confirmed working)
  *
  * Therefore, to ensure input rules (## / ### / > / -) fire correctly,
  * paragraph text uses Enter×2 to guarantee a fresh paragraph block for the next line.
@@ -740,9 +743,26 @@ async function applyMarkdownToEditor(page, markdownText) {
     if (line === '```' || line.startsWith('```')) {
       // Code block toggle
       if (inCodeBlock) {
-        // Closing ```: press Enter×2 to exit code block
-        await page.keyboard.press('Enter');
-        await page.keyboard.press('Enter');
+        // Closing ```: use Ctrl+Enter to exit code block (confirmed working in note.com)
+        await page.keyboard.press('Control+Enter');
+        await page.waitForTimeout(300);
+
+        // Verify exit succeeded
+        const exitedCodeBlock = await page.evaluate(() => {
+          const sel = window.getSelection();
+          if (!sel || !sel.anchorNode) return true;
+          const el = sel.anchorNode.nodeType === 3 ? sel.anchorNode.parentElement : sel.anchorNode;
+          return !el.closest('pre, code');
+        });
+
+        if (!exitedCodeBlock) {
+          // Fallback: Enter×3
+          console.log('[code] Ctrl+Enter脱出失敗。Enter×3フォールバック');
+          await page.keyboard.press('Enter');
+          await page.keyboard.press('Enter');
+          await page.keyboard.press('Enter');
+          await page.waitForTimeout(300);
+        }
         inCodeBlock = false;
       } else {
         // Opening ```: exit any active block first
@@ -756,7 +776,14 @@ async function applyMarkdownToEditor(page, markdownText) {
 
     } else if (inCodeBlock) {
       // Inside code block: use insertText (inserts \n as actual newline in code block)
-      await page.keyboard.insertText(line + '\n');
+      // Don't append \n on the last line before ``` to avoid extra blank line in code block
+      const nextLine = lines[i + 1];
+      const isLastCodeLine = (nextLine === '```' || (nextLine && nextLine.startsWith('```')));
+      if (isLastCodeLine) {
+        await page.keyboard.insertText(line);
+      } else {
+        await page.keyboard.insertText(line + '\n');
+      }
 
     } else if (line.trim() === '---' || line.trim() === '***') {
       // Horizontal rule: skip (ProseMirror would convert to a black thick line)
@@ -840,9 +867,24 @@ async function applyMarkdownToEditor(page, markdownText) {
       // Bullet list
       if (inQuote) { await page.keyboard.press('Enter'); inQuote = false; }
       if (!inList) {
+        // First list item: `- ` triggers input rule → bullet list
         await page.keyboard.type('- ');
-        await page.waitForTimeout(100);
+        await page.waitForTimeout(300);
         inList = true;
+      } else {
+        // 2nd+ item: Enter was pressed, but check DOM to ensure we're still in a list item
+        // (bold input rule can cause list context to be lost)
+        const stillInList = await page.evaluate(() => {
+          const sel = window.getSelection();
+          if (!sel || !sel.anchorNode) return false;
+          const el = sel.anchorNode.nodeType === 3 ? sel.anchorNode.parentElement : sel.anchorNode;
+          return !!el.closest('li');
+        });
+        if (!stillInList) {
+          console.log('[list] list context lost. Re-entering with "- "');
+          await page.keyboard.type('- ');
+          await page.waitForTimeout(300);
+        }
       }
       await applyInlineContent(page, line.slice(2));
       const nextLine = lines[i + 1];
