@@ -911,12 +911,18 @@ async function setCoverImage(page, imagePath) {
 
   console.log('[cover] カバー画像設定開始:', absPath);
 
+  // ページトップへスクロール（カバー画像ボタンが表示エリアに入るように）
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.waitForTimeout(1000);
+
   // エディタ上部のカバー画像設定エリアをクリック
   // ページ上部(y<200)にある「画像を追加」ボタンがカバー画像ボタン
+  await page.waitForSelector('button[aria-label="画像を追加"]', { timeout: 10000 });
   const allImageBtns = await page.$$('button[aria-label="画像を追加"]');
   let coverBtn = null;
   for (const btn of allImageBtns) {
     const bbox = await btn.boundingBox();
+    console.log('[cover] 画像追加ボタン位置: y=' + (bbox ? Math.round(bbox.y) : 'null'));
     if (bbox && bbox.y < 200) {
       coverBtn = btn;
       break;
@@ -949,19 +955,78 @@ async function setCoverImage(page, imagePath) {
     ]);
   }
   await fileChooser.setFiles(absPath);
-  await page.waitForTimeout(2000);
 
-  // トリミング確認ダイアログのOKをクリック
-  const okBtn = await page.$('button:has-text("OK")') ||
-                await page.$('button:has-text("適用")') ||
-                await page.$('button:has-text("完了")') ||
-                await page.$('button:has-text("設定する")');
-  if (okBtn) {
-    await okBtn.click();
-    await page.waitForTimeout(1000);
+  // CropModalが表示されるのを待つ
+  let cropModalVisible = false;
+  try {
+    await page.waitForSelector('.CropModal__content', { timeout: 8000 });
+    cropModalVisible = true;
+    console.log('[cover] CropModal表示確認');
+  } catch (_) {
+    console.log('[cover] NOTE: CropModal未表示。直接保存します。');
+  }
+
+  if (cropModalVisible) {
+    // CropModal内の保存ボタンをJS経由でクリック（ReactModal__Overlayのブロック回避）
+    const okClicked = await page.evaluate(() => {
+      const modal = document.querySelector('.CropModal__content');
+      if (!modal) return null;
+      for (const btn of modal.querySelectorAll('button')) {
+        const text = btn.textContent.trim();
+        if (['保存', 'OK', '適用', '完了', '設定する'].includes(text)) {
+          btn.click();
+          return text;
+        }
+      }
+      return null;
+    });
+    if (okClicked) {
+      console.log('[cover] CropModal保存ボタンクリック:', okClicked);
+      // アップロードAPIのレスポンス待機（カバー画像アップロード完了を確認）
+      try {
+        await page.waitForResponse(
+          res => res.url().includes('note_eyecatch') && res.status() < 400,
+          { timeout: 30000 }
+        );
+        console.log('[cover] カバー画像アップロード完了');
+      } catch (_) {
+        console.log('[cover] NOTE: アップロードレスポンス待機タイムアウト');
+      }
+    } else {
+      console.log('[cover] WARNING: CropModal内の保存ボタンが見つかりませんでした');
+    }
+    // CropModalが閉じるのを待つ
+    try {
+      await page.waitForSelector('.CropModal__overlay', { state: 'hidden', timeout: 15000 });
+      console.log('[cover] CropModal閉じ確認');
+    } catch (_) {
+      await page.waitForTimeout(5000);
+    }
   }
 
   console.log('[cover] カバー画像を設定しました:', absPath);
+
+  // 下書き保存をJS経由でクリック（モーダルオーバーレイのブロック回避）
+  const saved = await page.evaluate(() => {
+    for (const btn of document.querySelectorAll('button')) {
+      const text = btn.textContent.trim();
+      if (text === '下書き保存' || text === '保存する') {
+        btn.click();
+        return true;
+      }
+    }
+    return false;
+  });
+  if (saved) {
+    await page.waitForTimeout(2000);
+    console.log('[cover] 下書き保存完了');
+  } else {
+    // Ctrl+Sで保存
+    await page.keyboard.press('Control+S');
+    await page.waitForTimeout(2000);
+    console.log('[cover] Ctrl+Sで保存試行');
+  }
+
   return true;
 }
 
