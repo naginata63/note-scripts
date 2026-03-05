@@ -65,6 +65,8 @@ AIツールが乱立する今、「どのモデルを使えばいい？」と迷
 
 ## スペック早見表
 
+![AIモデル比較グラフ（HumanEval・コンテキスト・API料金）](images/ai_comparison_chart.png)
+
 **コンテキストウィンドウ**
 - Gemini 3.1 Pro: 100万トークン
 - GPT-5.3-Codex: 40万トークン（400K）
@@ -74,11 +76,6 @@ AIツールが乱立する今、「どのモデルを使えばいい？」と迷
 - Gemini 3.1 Pro: 2026年2月19日
 - GPT-5.3-Codex: 2026年2月5日
 - Claude Opus 4.6: 2026年2月5日
-
-**ベンチマーク（HumanEval）**
-- Gemini 3.1 Pro: 94.2%
-- GPT-5.3-Codex: 93%
-- Claude Opus 4.6: Terminal-Bench 2.0 フロンティアモデル中1位（HumanEval非公表）
 
 **API料金（入力/100万トークン）**
 - Gemini 3.1 Pro: $2.00
