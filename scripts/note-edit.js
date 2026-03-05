@@ -84,6 +84,10 @@ async function main() {
         } else {
           await editNote(page, args.url, args.body || '');
         }
+        if (args['cover-image']) {
+          const absPath = require('path').resolve(args['cover-image']);
+          await setCoverImage(page, absPath);
+        }
         if (args['image-file']) {
           await uploadImage(page, args['image-file']);
         }
@@ -889,6 +893,76 @@ async function uploadImage(page, imagePath) {
     await page.waitForTimeout(2000);
     console.log('[image] 画像挿入後の下書き保存完了');
   }
+}
+
+/**
+ * setCoverImage(page, imagePath)
+ * Set cover (header) image for the note article.
+ * Clicks the cover image button in the editor header, then uploads the image file.
+ */
+async function setCoverImage(page, imagePath) {
+  const path = require('path');
+  const absPath = path.resolve(imagePath);
+
+  if (!fs.existsSync(absPath)) {
+    console.error(`[cover] ファイルが見つかりません: ${absPath}`);
+    return false;
+  }
+
+  console.log('[cover] カバー画像設定開始:', absPath);
+
+  // エディタ上部のカバー画像設定エリアをクリック
+  // ページ上部(y<200)にある「画像を追加」ボタンがカバー画像ボタン
+  const allImageBtns = await page.$$('button[aria-label="画像を追加"]');
+  let coverBtn = null;
+  for (const btn of allImageBtns) {
+    const bbox = await btn.boundingBox();
+    if (bbox && bbox.y < 200) {
+      coverBtn = btn;
+      break;
+    }
+  }
+  if (!coverBtn) {
+    console.log('[cover] WARNING: カバー画像ボタンが見つかりません。セレクタを確認してください。');
+    return false;
+  }
+  console.log('[cover] カバー画像ボタン発見。クリックします。');
+
+  // ファイルチューザーが直接開く場合とサブメニューが出る場合の両方に対応
+  let fileChooser;
+  try {
+    [fileChooser] = await Promise.all([
+      page.waitForEvent('filechooser', { timeout: 3000 }),
+      coverBtn.click(),
+    ]);
+  } catch (_) {
+    // サブメニューが出た場合：アップロードオプションを探す
+    const uploadOption = await page.$('button:has-text("画像をアップロード")') ||
+                         await page.$('button:has-text("アップロード")');
+    if (!uploadOption) {
+      console.log('[cover] WARNING: アップロードオプションが見つかりません');
+      return false;
+    }
+    [fileChooser] = await Promise.all([
+      page.waitForEvent('filechooser', { timeout: 5000 }),
+      uploadOption.click(),
+    ]);
+  }
+  await fileChooser.setFiles(absPath);
+  await page.waitForTimeout(2000);
+
+  // トリミング確認ダイアログのOKをクリック
+  const okBtn = await page.$('button:has-text("OK")') ||
+                await page.$('button:has-text("適用")') ||
+                await page.$('button:has-text("完了")') ||
+                await page.$('button:has-text("設定する")');
+  if (okBtn) {
+    await okBtn.click();
+    await page.waitForTimeout(1000);
+  }
+
+  console.log('[cover] カバー画像を設定しました:', absPath);
+  return true;
 }
 
 main().catch(err => {
