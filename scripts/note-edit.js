@@ -112,22 +112,82 @@ async function main() {
 
 /**
  * ensureLoggedIn(page)
- * Check login state. If not logged in, attempt auto-login using NOTE_EMAIL/NOTE_PASSWORD.
- * Falls back to waiting for manual login if env vars are not set.
+ * Check login state via redirect detection. If redirected to login page, auto-login.
+ * Returns true if logged in (or login succeeded), false if login failed.
  */
 async function ensureLoggedIn(page) {
-  console.log('[auth] ログイン状態確認中...');
-  // /settings は認証必須。/dashboard は公開ページのため使用しない
-  await page.goto('https://note.com/settings');
-  await page.waitForLoadState('domcontentloaded', { timeout: 15000 });
-
-  if (!page.url().includes('/login')) {
-    console.log('[auth] ログイン済み:', page.url());
-    return;
+  // NOTE_EMAIL/NOTE_PASSWORDが未設定の場合のwarning
+  if (!process.env.NOTE_EMAIL || !process.env.NOTE_PASSWORD) {
+    console.warn('[auth] WARNING: NOTE_EMAIL / NOTE_PASSWORD が未設定。~/.bashrcをsource済みか確認してください。');
   }
 
-  console.log('[auth] 未ログイン。ログイン処理を開始します...');
-  await performLogin(page);
+  // editor.note.comにアクセスしてリダイレクト先で判定
+  await page.goto('https://editor.note.com', { waitUntil: 'networkidle', timeout: 30000 });
+  const currentUrl = page.url();
+
+  // ログインページにリダイレクトされたか確認
+  const needsLogin = currentUrl.includes('note.com/login') ||
+                     currentUrl.includes('accounts.note.com') ||
+                     currentUrl.includes('/sign_in');
+
+  if (!needsLogin) {
+    console.log('[auth] ログイン済み（セッション有効）— スキップ');
+    return true;
+  }
+
+  console.log('[auth] セッション切れ — ログイン実行');
+  // ログインフォームへ遷移
+  await page.goto('https://note.com/login', { waitUntil: 'networkidle' });
+  await page.waitForTimeout(1000);
+
+  // フォーム要素を複数セレクタで検出
+  const emailField = await page.$('input[name="email"]') ||
+                     await page.$('input[type="email"]') ||
+                     await page.$('input[name="login"]') ||
+                     await page.$('#email') ||
+                     await page.$('input[placeholder*="メール"]');
+
+  if (!emailField) {
+    console.log('[auth] WARNING: ログインフォームが見つかりません。3秒後にリトライ...');
+    await page.waitForTimeout(3000);
+    const retryField = await page.$('input[name="email"]') ||
+                       await page.$('input[type="email"]') ||
+                       await page.$('input[name="login"]');
+    if (!retryField) {
+      console.log('[auth] ERROR: ログインフォームが見つかりませんでした');
+      return false;
+    }
+    await retryField.fill(process.env.NOTE_EMAIL || '');
+  } else {
+    await emailField.fill(process.env.NOTE_EMAIL || '');
+  }
+
+  const passwordField = await page.$('input[name="password"]') ||
+                        await page.$('input[type="password"]') ||
+                        await page.$('#password');
+  if (!passwordField) {
+    console.log('[auth] ERROR: パスワードフィールドが見つかりません');
+    return false;
+  }
+  await passwordField.fill(process.env.NOTE_PASSWORD || '');
+  await page.keyboard.press('Enter');
+
+  // ログイン完了を待つ
+  try {
+    await page.waitForNavigation({ waitUntil: 'networkidle', timeout: 15000 });
+  } catch (e) {
+    // タイムアウトは無視（SPA遷移で発火しない場合あり）
+  }
+  await page.waitForTimeout(2000);
+
+  // ログイン成功確認
+  const afterUrl = page.url();
+  if (afterUrl.includes('note.com/login') || afterUrl.includes('sign_in')) {
+    console.log('[auth] ERROR: ログイン失敗（ログインページに留まっています）');
+    return false;
+  }
+  console.log('[auth] ログイン成功');
+  return true;
 }
 
 /**
