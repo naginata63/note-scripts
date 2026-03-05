@@ -908,23 +908,33 @@ async function applyMarkdownToEditor(page, markdownText) {
       await applyInlineContent(page, line);
       // Enter count depends on what follows:
       // - No more content: no Enter (avoid auto-conversion side effects)
-      // - Next is blank line (Markdown paragraph break): Enter×2 → new paragraph block
-      // - Next is input rule trigger (##, ###, >, -, ```, URL): Enter×2 → fresh paragraph block needed
+      // - Next is blank line (Markdown paragraph separator):
+      //   - If followed by input rule trigger (##, ###, >, -, ```, URL, ![]): Enter×2 (new paragraph block required)
+      //   - Otherwise: Enter×1 (<br> only, matches how humans type in note.com)
+      // - Next is input rule trigger (##, ###, >, -, ```, URL, ![]): Enter×2 → fresh paragraph block needed
       // - Next is non-empty text: Enter×1 (<br>, same paragraph continuation)
       const nextLine = lines[i + 1];
       const nextNonEmpty = lines.slice(i + 1).find(l => l.trim() !== '');
       if (!nextNonEmpty) {
         // Last content line: no Enter
       } else if (!nextLine || nextLine.trim() === '') {
-        // Next is blank → paragraph break
-        await page.keyboard.press('Enter');
-        await page.keyboard.press('Enter');
-      } else if (/^(#{2,3} |> |- |```|https?:\/\/)/.test(nextLine)) {
-        // Input rule line follows: ensure fresh paragraph block
+        // Next is blank line (Markdown paragraph separator)
+        // Check what comes AFTER the blank line(s)
+        if (nextNonEmpty && /^(#{2,3} |> |- |```|https?:\/\/|!\[)/.test(nextNonEmpty)) {
+          // Input rule line after blank: Enter×2 (new paragraph block required)
+          await page.keyboard.press('Enter');
+          await page.keyboard.press('Enter');
+        } else {
+          // Regular text paragraph after blank: Enter×1 (<br> only)
+          // This matches how humans type in note.com — single Enter between paragraphs
+          await page.keyboard.press('Enter');
+        }
+      } else if (/^(#{2,3} |> |- |```|https?:\/\/|!\[)/.test(nextLine)) {
+        // Input rule line follows directly (no blank line): Enter×2
         await page.keyboard.press('Enter');
         await page.keyboard.press('Enter');
       } else {
-        // Same paragraph continuation: <br>
+        // Same paragraph continuation (no blank line): Enter×1 (<br>)
         await page.keyboard.press('Enter');
       }
 
