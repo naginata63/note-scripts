@@ -62,4 +62,4 @@ node scripts/note-edit.js --action=create \
 
 OSSとして公開しているので、興味があれば試してみてください。フィードバックやPRも歓迎です。
 
-[GitHubリポジトリ](https://github.com/naginata63/note-scripts)
+https://github.com/naginata63/note-scripts

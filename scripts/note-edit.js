@@ -693,6 +693,14 @@ async function applyMarkdownToEditor(page, markdownText) {
     } else if (line.trim() === '---' || line.trim() === '***') {
       // Horizontal rule: skip (ProseMirror would convert to a black thick line)
 
+    } else if (/^https?:\/\/\S+$/.test(line.trim())) {
+      // URL-only line → embed card (note auto-converts to OGP card)
+      if (inList) { await page.keyboard.press('Enter'); inList = false; }
+      if (inQuote) { await page.keyboard.press('Enter'); inQuote = false; }
+      await page.keyboard.type(line.trim());
+      await page.keyboard.press('Enter');
+      await page.waitForTimeout(2000); // Wait for embed card conversion
+
     } else if (line.startsWith('## ')) {
       // H2 heading: input rule fires on "## " → Enter exits heading to new paragraph
       if (inList) { await page.keyboard.press('Enter'); inList = false; }
