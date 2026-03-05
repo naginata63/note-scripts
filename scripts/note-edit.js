@@ -1119,7 +1119,8 @@ async function setCoverImage(page, imagePath) {
       coverBtn.click(),
     ]);
   } catch (_) {
-    // サブメニューが出た場合：アップロードオプションを探す
+    // サブメニューが出た場合：アップロードオプションを探す（サブメニュー描画待ち）
+    await page.waitForTimeout(1000);
     const uploadOption = await page.$('button:has-text("画像をアップロード")') ||
                          await page.$('button:has-text("アップロード")');
     if (!uploadOption) {
