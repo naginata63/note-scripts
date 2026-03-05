@@ -2,7 +2,15 @@
 
 note.com の記事管理を CLI で自動化する Playwright スクリプト集。
 
-下書き作成・編集・公開・一覧取得をコマンドラインから実行できます。
+下書き作成・編集・公開・一覧取得・画像挿入・カバー画像設定をコマンドラインから実行できます。
+
+## 特長
+
+- **API不要**: noteの公開APIに依存しない。ブラウザGUI自動操作で動作
+- **Markdown自動変換**: `.md`ファイルをそのまま投稿。見出し・太字・箇条書き・コードブロック・リンクカードに対応
+- **画像自動挿入**: AIで生成した画像を1コマンドで記事に追加
+- **カバー画像設定**: アイキャッチ画像も自動設定
+- **セッション保持**: 一度ログインするとCookieを保存し、2回目以降はスムーズ
 
 ## 必要環境
 
@@ -21,7 +29,7 @@ npm run install-browsers
 
 ## 認証情報の設定
 
-環境変数で note.com のログイン情報を渡します。`.env` ファイルや `~/.bashrc` に設定してください:
+環境変数で note.com のログイン情報を渡します。`~/.bashrc` に設定してください:
 
 ```bash
 export NOTE_EMAIL="your-email@example.com"
@@ -59,7 +67,7 @@ node scripts/note-edit.js --action=publish \
   --url="https://note.com/username/n/xxxxxxxx"
 ```
 
-### Markdown記法で下書き作成
+### Markdown記法で投稿
 
 `--body-file` で Markdownファイルを指定すると、noteエディタ上でリッチテキストに自動変換されます。
 
@@ -84,7 +92,30 @@ node scripts/note-edit.js --action=create \
 
 ※ テーブル記法はnote非対応のため自動スキップされます（警告メッセージ表示）。
 
-![Markdown変換デモ](images/markdown_demo.png)
+### 画像を追加する
+
+```bash
+node scripts/note-edit.js --action=edit \
+  --url="https://note.com/n/xxxx" \
+  --image-file=path/to/image.png
+```
+
+### カバー画像（アイキャッチ）を設定する
+
+```bash
+node scripts/note-edit.js --action=edit \
+  --url="https://note.com/n/xxxx" \
+  --cover-image=path/to/cover.png
+```
+
+## セッション管理
+
+初回実行時にブラウザが起動してnoteにログインします。
+認証情報は `~/.cache/ms-playwright/note-cli-profile` に保存されるため、
+2回目以降は自動的にログインをスキップします。
+
+セッションが切れた場合は自動で再ログインします。
+環境変数 `NOTE_EMAIL` と `NOTE_PASSWORD` を `~/.bashrc` に設定してください。
 
 ## 動作確認環境
 
@@ -104,9 +135,14 @@ node scripts/note-edit.js --action=create \
 ## ファイル構成
 
 ```
-scripts/
-  note-edit.js    # メインスクリプト
-  selectors.md    # セレクタ調査メモ（開発者向け参考情報）
+note_mcp_server/
+├── scripts/
+│   ├── note-edit.js        # メインスクリプト（投稿・編集・画像追加）
+│   └── note-screenshot.js  # フルページスクショ取得
+├── articles/               # Markdown記事ファイル
+├── images/                 # 記事用画像ファイル
+├── package.json
+└── README.md
 ```
 
 ## ライセンス

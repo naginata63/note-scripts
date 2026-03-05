@@ -2,3 +2,22 @@ node_modules/
 dist/
 *.env
 .env*
+
+# 開発用スクリプト（ルート）
+check_charcount.js
+shortcut_test.js
+take_screenshot.js
+take_screenshots.js
+
+# 開発用スクリプト（scripts/）
+scripts/check_note.js
+scripts/check_note2.js
+scripts/inspect_cover.js
+scripts/set_captions.js
+
+# Playwright認証データ
+playwright-data/
+
+# ローカル設定
+selectors.md
+scripts/selectors.md
