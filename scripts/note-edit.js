@@ -292,7 +292,7 @@ async function editNote(page, url, newBody, options = {}) {
   const editorUrl = toEditorUrl(url);
   console.log('[edit] エディタを開きます:', editorUrl);
   await page.goto(editorUrl);
-  await page.waitForURL(/editor\.note\.com/, { timeout: 20000 });
+  await page.waitForURL(/editor\.note\.com\/notes\/[a-z0-9]+\/edit/, { timeout: 30000 });
 
   // Wait for ProseMirror editor
   await page.waitForSelector('.ProseMirror', { timeout: 15000 });
@@ -304,12 +304,30 @@ async function editNote(page, url, newBody, options = {}) {
   await page.keyboard.press('Delete');
   await page.waitForTimeout(300);
 
+  // フォーカス再取得（Ctrl+A+Delete後にProseMirrorのフォーカスが失われる問題を修正）
+  await page.click('.ProseMirror');
+  await page.waitForTimeout(300);
+  const hasFocus = await page.evaluate(() => {
+    const pm = document.querySelector('.ProseMirror');
+    return pm && (pm === document.activeElement || pm.contains(document.activeElement));
+  });
+  if (!hasFocus) {
+    console.log('[edit] WARNING: フォーカス喪失。再取得...');
+    await page.focus('.ProseMirror');
+    await page.waitForTimeout(300);
+  }
+
   // Type new body
   if (options.markdownContent) {
     console.log('[edit] Markdownモードで本文を入力します...');
     await applyMarkdownToEditor(page, options.markdownContent);
   } else {
     await page.keyboard.type(newBody);
+  }
+
+  // Wait for async editor operations before saving (e.g. link URL parsing)
+  if (options.markdownContent) {
+    await page.waitForTimeout(1000);
   }
 
   // Save: click the "下書き保存" button (Ctrl+S does not trigger server-side save)
@@ -588,16 +606,26 @@ async function applyInlineContent(page, text) {
       await page.keyboard.press('Control+k');
       await page.waitForTimeout(500);
       // Wait for URL input and scroll it into view using element handle (avoids viewport issues)
-      const linkInput = await page.waitForSelector('textarea[placeholder="https://"]', { timeout: 5000 });
-      await linkInput.scrollIntoViewIfNeeded();
-      await linkInput.click();
-      await page.waitForTimeout(200);
-      await page.keyboard.type(seg.url);
-      // Click the "適用" (Apply) button to confirm the inline link.
-      // Note: pressing Enter in the textarea inserts a newline, NOT submit.
-      const applyBtn = await page.waitForSelector('button:has-text("適用")', { timeout: 3000 });
-      await applyBtn.scrollIntoViewIfNeeded();
-      await applyBtn.click();
+      await page.waitForSelector('textarea[placeholder="https://"]', { timeout: 5000 });
+      // Use JS focus+value to bypass viewport constraints (popup may be off-screen)
+      await page.evaluate((url) => {
+        const el = document.querySelector('textarea[placeholder="https://"]');
+        if (el) {
+          el.focus();
+          // Trigger React synthetic event to update state
+          const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+          nativeInputValueSetter.call(el, url);
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      }, seg.url);
+      await page.waitForTimeout(300);
+      // Click the "適用" (Apply) button via JS to bypass viewport constraints.
+      await page.evaluate(() => {
+        for (const btn of document.querySelectorAll('button')) {
+          if (btn.textContent.trim() === '適用') { btn.click(); return; }
+        }
+      });
       await page.waitForTimeout(500);
       // Move cursor past the link to deselect
       await page.keyboard.press('ArrowRight');
@@ -753,7 +781,7 @@ async function applyMarkdownToEditor(page, markdownText) {
  * Uses the file chooser API (Playwright) to set the file via the toolbar's image insert button.
  *
  * Flow:
- *   1. Click toolbar button[aria-label="画像"] → triggers file chooser dialog
+ *   1. Click toolbar button[aria-label="画像を追加"] → triggers file chooser dialog
  *   2. Set image file via fileChooser.setFiles()
  *   3. Wait for upload completion (image appears in editor)
  *
@@ -784,7 +812,7 @@ async function uploadImage(page, imagePath) {
   try {
     const [fileChooser] = await Promise.all([
       page.waitForEvent('filechooser', { timeout: 8000 }),
-      page.click('button[aria-label="画像"]'),
+      page.click('button[aria-label="画像を追加"]'),
     ]);
     await fileChooser.setFiles(absPath);
     console.log('[image] ファイル選択完了 (filechooser)');
@@ -793,18 +821,41 @@ async function uploadImage(page, imagePath) {
 
     // Strategy 2: direct input[type="file"] injection
     try {
-      await page.click('button[aria-label="画像"]');
+      await page.click('button[aria-label="画像を追加"]');
       await page.waitForTimeout(1000);
       const fileInput = await page.$('input[type="file"]');
       if (fileInput) {
         await fileInput.setInputFiles(absPath);
         console.log('[image] ファイル選択完了 (direct input)');
       } else {
-        console.log('[image] input[type="file"]が見つかりませんでした。手動で画像を挿入してください。');
-        return;
+        console.log('[image] input[type="file"]が見つかりませんでした。クリップボード貼り付けを試みます。');
       }
     } catch (err2) {
-      console.log('[image] 画像アップロード自動化断念。手動挿入が必要です:', err2.message);
+      console.log('[image] Strategy2失敗。クリップボード貼り付けを試みます:', err2.message);
+    }
+
+    // Strategy 3: Clipboard paste (fallback)
+    try {
+      console.log('[image] クリップボード貼り付けを試みます...');
+      const context = page.context();
+      await context.grantPermissions(['clipboard-write', 'clipboard-read']);
+      const imgBase64 = fs.readFileSync(absPath).toString('base64');
+      const mimeType = absPath.endsWith('.png') ? 'image/png' : 'image/jpeg';
+      await page.evaluate(async ([b64, mime]) => {
+        const res = await fetch(`data:${mime};base64,${b64}`);
+        const blob = await res.blob();
+        await navigator.clipboard.write([new ClipboardItem({ [mime]: blob })]);
+      }, [imgBase64, mimeType]);
+      await page.click('.ProseMirror');
+      await page.keyboard.press('Control+End');
+      await page.keyboard.press('Enter');
+      await page.waitForTimeout(500);
+      await page.keyboard.press('Control+v');
+      await page.waitForTimeout(2000);
+      console.log('[image] クリップボード貼り付け完了');
+    } catch (err3) {
+      console.log('[image] クリップボード貼り付け失敗:', err3.message);
+      console.log('[image] 画像アップロード自動化断念。手動挿入が必要です。');
       return;
     }
   }
