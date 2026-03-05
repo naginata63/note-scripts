@@ -750,17 +750,46 @@ async function applyMarkdownToEditor(page, markdownText) {
         if (inQuote) { await page.keyboard.press('Enter'); inQuote = false; }
         // Type ``` to trigger ProseMirror code block input rule
         await page.keyboard.type('```');
-        await page.waitForTimeout(200);
+        await page.waitForTimeout(500); // Wait for code block input rule to fire
         inCodeBlock = true;
       }
 
     } else if (inCodeBlock) {
-      // Inside code block: type the line as-is and press Enter
-      await page.keyboard.type(line);
-      await page.keyboard.press('Enter');
+      // Inside code block: use insertText (inserts \n as actual newline in code block)
+      await page.keyboard.insertText(line + '\n');
 
     } else if (line.trim() === '---' || line.trim() === '***') {
       // Horizontal rule: skip (ProseMirror would convert to a black thick line)
+
+    } else if (/^!\[.*?\]\((.+?)\)/.test(line.trim())) {
+      // Markdown image reference: upload if local file exists, skip external URLs
+      if (inList) { await page.keyboard.press('Enter'); inList = false; }
+      if (inQuote) { await page.keyboard.press('Enter'); inQuote = false; }
+      const imgMatch = line.trim().match(/^!\[.*?\]\((.+?)\)/);
+      const imgPath = imgMatch ? imgMatch[1] : null;
+      if (imgPath && !imgPath.startsWith('http')) {
+        const path = require('path');
+        const absPath = path.resolve(imgPath);
+        if (fs.existsSync(absPath)) {
+          console.log('[markdown] 画像を挿入:', absPath);
+          // Move cursor to end of typed content, then upload via clipboard (no cursor displacement)
+          await page.keyboard.press('Control+End');
+          await page.waitForTimeout(200);
+          await uploadImage(page, absPath, { skipClick: true });
+          // After upload+save, re-focus editor (save button click steals focus)
+          // then exit figcaption by pressing Enter (creates new paragraph after figure)
+          await page.focus('.ProseMirror');
+          await page.waitForTimeout(300);
+          await page.keyboard.press('Control+End');  // move to end (figcaption of last image)
+          await page.waitForTimeout(200);
+          await page.keyboard.press('Enter');  // exit figcaption → new paragraph created
+          await page.waitForTimeout(200);
+        } else {
+          console.log('[markdown] 画像ファイルなし（スキップ）:', imgPath);
+        }
+      } else {
+        console.log('[markdown] 外部画像参照をスキップ:', line.trim());
+      }
 
     } else if (/^https?:\/\/\S+$/.test(line.trim())) {
       // URL-only line → embed card (note auto-converts to OGP card)
@@ -775,7 +804,7 @@ async function applyMarkdownToEditor(page, markdownText) {
       if (inList) { await page.keyboard.press('Enter'); inList = false; }
       if (inQuote) { await page.keyboard.press('Enter'); inQuote = false; }
       await page.keyboard.type('## ');
-      await page.waitForTimeout(100);
+      await page.waitForTimeout(500); // Wait for ## input rule to fire
       await applyInlineContent(page, line.slice(3));
       await page.keyboard.press('Enter');  // Heading Enter → new paragraph (not <br>)
 
@@ -784,7 +813,7 @@ async function applyMarkdownToEditor(page, markdownText) {
       if (inList) { await page.keyboard.press('Enter'); inList = false; }
       if (inQuote) { await page.keyboard.press('Enter'); inQuote = false; }
       await page.keyboard.type('### ');
-      await page.waitForTimeout(100);
+      await page.waitForTimeout(500); // Wait for ### input rule to fire
       await applyInlineContent(page, line.slice(4));
       await page.keyboard.press('Enter');  // Heading Enter → new paragraph
 
@@ -835,15 +864,25 @@ async function applyMarkdownToEditor(page, markdownText) {
       if (inList) { await page.keyboard.press('Enter'); inList = false; }
       if (inQuote) { await page.keyboard.press('Enter'); inQuote = false; }
       await applyInlineContent(page, line);
-      // Enter×2 to create new paragraph block (only if more content follows).
-      // In note.com's editor, Enter in a paragraph creates <br> (not a new paragraph).
-      // A second Enter on the empty position after <br> creates a proper new paragraph block,
-      // allowing the next line's input rules (## / ### / > / -) to fire correctly.
-      // IMPORTANT: Skip Enter×2 for the last content line to avoid auto-conversion side effects
-      // (e.g., Enter after an inline link triggers note.com URL embed conversion).
-      const hasMoreContent = lines.slice(i + 1).some(l => l.trim() !== '');
-      if (hasMoreContent) {
+      // Enter count depends on what follows:
+      // - No more content: no Enter (avoid auto-conversion side effects)
+      // - Next is blank line (Markdown paragraph break): Enter×2 → new paragraph block
+      // - Next is input rule trigger (##, ###, >, -, ```, URL): Enter×2 → fresh paragraph block needed
+      // - Next is non-empty text: Enter×1 (<br>, same paragraph continuation)
+      const nextLine = lines[i + 1];
+      const nextNonEmpty = lines.slice(i + 1).find(l => l.trim() !== '');
+      if (!nextNonEmpty) {
+        // Last content line: no Enter
+      } else if (!nextLine || nextLine.trim() === '') {
+        // Next is blank → paragraph break
         await page.keyboard.press('Enter');
+        await page.keyboard.press('Enter');
+      } else if (/^(#{2,3} |> |- |```|https?:\/\/)/.test(nextLine)) {
+        // Input rule line follows: ensure fresh paragraph block
+        await page.keyboard.press('Enter');
+        await page.keyboard.press('Enter');
+      } else {
+        // Same paragraph continuation: <br>
         await page.keyboard.press('Enter');
       }
 
@@ -864,7 +903,7 @@ async function applyMarkdownToEditor(page, markdownText) {
  *
  * Falls back to direct input[type="file"] injection if file chooser event is not triggered.
  */
-async function uploadImage(page, imagePath) {
+async function uploadImage(page, imagePath, options = {}) {
   const path = require('path');
   const absPath = path.resolve(imagePath);
 
@@ -881,10 +920,15 @@ async function uploadImage(page, imagePath) {
     return;
   }
 
-  // Click ProseMirror to ensure focus (cursor must be in editor for image insertion)
-  await page.click('.ProseMirror');
-  await page.waitForTimeout(500);
+  if (!options.skipClick) {
+    // Click ProseMirror to ensure focus (cursor must be in editor for image insertion)
+    await page.click('.ProseMirror');
+    await page.waitForTimeout(500);
+  }
 
+  if (options.skipClick) {
+    // Inline mode: skip Strategies 1+2 (they don't work mid-typing), go directly to clipboard paste
+  } else {
   // Strategy 1: Wait for file chooser before clicking the toolbar image button
   try {
     const [fileChooser] = await Promise.all([
@@ -893,6 +937,12 @@ async function uploadImage(page, imagePath) {
     ]);
     await fileChooser.setFiles(absPath);
     console.log('[image] ファイル選択完了 (filechooser)');
+    // Strategy 1 success — skip clipboard fallback
+    await page.waitForSelector('.ProseMirror img, .ProseMirror figure', { timeout: 15000 }).catch(() => {});
+    await page.waitForTimeout(1000);
+    const saveBtn1 = await page.$('button:has-text("下書き保存")');
+    if (saveBtn1) { await saveBtn1.click({ force: true }); await page.waitForTimeout(2000); console.log('[image] 画像挿入後の下書き保存完了'); }
+    return;
   } catch (err) {
     console.log('[image] filechooserイベントが取得できませんでした。直接input[type="file"]を試みます:', err.message);
 
@@ -910,6 +960,8 @@ async function uploadImage(page, imagePath) {
     } catch (err2) {
       console.log('[image] Strategy2失敗。クリップボード貼り付けを試みます:', err2.message);
     }
+  }
+  } // end if (!options.skipClick)
 
     // Strategy 3: Clipboard paste (fallback)
     try {
@@ -923,10 +975,13 @@ async function uploadImage(page, imagePath) {
         const blob = await res.blob();
         await navigator.clipboard.write([new ClipboardItem({ [mime]: blob })]);
       }, [imgBase64, mimeType]);
-      await page.click('.ProseMirror');
-      await page.keyboard.press('Control+End');
-      await page.keyboard.press('Enter');
-      await page.waitForTimeout(500);
+      if (!options.skipClick) {
+        // Standalone upload: click ProseMirror and move to end
+        await page.click('.ProseMirror');
+        await page.keyboard.press('Control+End');
+        await page.keyboard.press('Enter');
+        await page.waitForTimeout(500);
+      }
       await page.keyboard.press('Control+v');
       await page.waitForTimeout(2000);
       console.log('[image] クリップボード貼り付け完了');
@@ -935,7 +990,6 @@ async function uploadImage(page, imagePath) {
       console.log('[image] 画像アップロード自動化断念。手動挿入が必要です。');
       return;
     }
-  }
 
   // Wait for upload to complete (image should appear in editor as <img> or figure)
   try {

@@ -30,6 +30,8 @@ node scripts/note-edit.js --action=edit \
 
 また、画像の追加も1コマンドで可能です。`--image-file`オプションで記事本文に画像を挿入でき、`--cover-image`オプションでカバー画像（アイキャッチ）を設定できます。AIが生成した画像を自動で付けて投稿するところまでを一気通貫で実現しています。
 
+![AIによるnote自動投稿のワークフロー](images/ai_auto_post_workflow.png)
+
 ## 苦労した点 🔧
 
 実はここまでの道のりが長かったです。
@@ -41,6 +43,14 @@ node scripts/note-edit.js --action=edit \
 **解決策：headedモード**　ブラウザ画面を実際に表示する「headedモード」に切り替えたところ、あっさり動きました。グラフィカルな環境（DISPLAYあり）が必要になりますが、Linux環境でDISPLAY=:0を設定すれば問題ありません。
 
 **エディタの仕組み**　noteのエディタはTiptapベースのProseMirrorを使っています。ProseMirrorにはMarkdownの「input rule」機能があり、##と入力すると自動的にh2見出しに変換される仕組みがあります。これを利用してMarkdownをリッチテキストとして入力することで、確実な変換を実現しています。
+
+**画像生成モデルの選定**　挿絵の自動生成にも試行錯誤がありました。最初はGeminiのフラッシュモデルで試していましたが、より高品質な画像を求めてGoogle DeepMindのImagen 4（imagen-4.0-generate-001）に切り替えました。テキストを直接画像に描き込める点が便利で、記事の内容に合ったオリジナル画像を自動生成できるようになっています。
+
+**ログイン判定の改善**　セッション管理にも改善を重ねました。Playwrightの`launchPersistentContext`でセッションを保存していますが、長時間経過するとセッションが切れることがあります。そこで`ensureLoggedIn()`という関数を実装し、各操作前にログイン状態を自動確認→未ログインなら自動ログインという仕組みにしました。これにより、セッション切れによる突然の失敗がなくなりました。
+
+**見出し変換の安定化**　見出し記法（## や ###）の変換でもハマりポイントがありました。ProseMirrorのinput ruleは「空の段落ブロックの先頭で ## と入力」したときに発火するのですが、入力タイミングが少しでもずれると変換されず記号がそのまま表示されてしまいます。wait時間を調整してinput ruleの発火を確実にすることで、この問題を解決しました。
+
+![自動投稿で直面した課題と対策](images/ai_auto_post_challenges.png)
 
 ## 使い方
 
@@ -71,8 +81,6 @@ node scripts/note-edit.js --action=edit \
 `--image-file`を指定すると記事の末尾に画像が追加されます。カバー画像（アイキャッチ）を設定したい場合は`--cover-image`オプションを使います。複数の画像を別々のコマンドで追加することもできます。
 
 詳しくはGitHubリポジトリのREADMEを参照してください。
-
-![実行画面](images/ai_auto_post_screenshot.png)
 
 ## 技術的な詳細
 
@@ -111,3 +119,5 @@ Playwrightの`launchPersistentContext`を使ってプロファイルディレク
 OSSとして公開しているので、興味があれば試してみてください。フィードバックやPRも歓迎です。
 
 https://github.com/naginata63/note-scripts
+
+![ロボットライターが記事を自動生成するイメージ](images/robot_writer.png)
