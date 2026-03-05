@@ -299,35 +299,40 @@ async function editNote(page, url, newBody, options = {}) {
   await page.click('.ProseMirror');
   await page.waitForTimeout(300);
 
-  // Select all and delete existing content
-  await page.keyboard.press('Control+A');
-  await page.keyboard.press('Delete');
-  await page.waitForTimeout(300);
+  const hasNewContent = options.markdownContent || (newBody && newBody.length > 0);
 
-  // フォーカス再取得（Ctrl+A+Delete後にProseMirrorのフォーカスが失われる問題を修正）
-  await page.click('.ProseMirror');
-  await page.waitForTimeout(300);
-  const hasFocus = await page.evaluate(() => {
-    const pm = document.querySelector('.ProseMirror');
-    return pm && (pm === document.activeElement || pm.contains(document.activeElement));
-  });
-  if (!hasFocus) {
-    console.log('[edit] WARNING: フォーカス喪失。再取得...');
-    await page.focus('.ProseMirror');
+  if (hasNewContent) {
+    // Select all and delete existing content
+    await page.keyboard.press('Control+A');
+    await page.keyboard.press('Delete');
     await page.waitForTimeout(300);
-  }
 
-  // Type new body
-  if (options.markdownContent) {
-    console.log('[edit] Markdownモードで本文を入力します...');
-    await applyMarkdownToEditor(page, options.markdownContent);
+    // フォーカス再取得（Ctrl+A+Delete後にProseMirrorのフォーカスが失われる問題対策）
+    await page.click('.ProseMirror');
+    await page.waitForTimeout(300);
+    const hasFocus = await page.evaluate(() => {
+      const pm = document.querySelector('.ProseMirror');
+      return pm && (pm === document.activeElement || pm.contains(document.activeElement));
+    });
+    if (!hasFocus) {
+      console.log('[edit] WARNING: フォーカス喪失。再取得...');
+      await page.focus('.ProseMirror');
+      await page.waitForTimeout(300);
+    }
+
+    // Type new body
+    if (options.markdownContent) {
+      console.log('[edit] Markdownモードで本文を入力します...');
+      await applyMarkdownToEditor(page, options.markdownContent);
+    } else {
+      await page.keyboard.type(newBody);
+    }
+
+    if (options.markdownContent) {
+      await page.waitForTimeout(1000);
+    }
   } else {
-    await page.keyboard.type(newBody);
-  }
-
-  // Wait for async editor operations before saving (e.g. link URL parsing)
-  if (options.markdownContent) {
-    await page.waitForTimeout(1000);
+    console.log('[edit] 本文指定なし — 既存本文を保持します');
   }
 
   // Save: click the "下書き保存" button (Ctrl+S does not trigger server-side save)
