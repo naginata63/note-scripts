@@ -40,7 +40,7 @@ async function main() {
   if (!action) {
     console.error('Usage: node note-edit.js --action=<login|create|edit|publish|list> [options]');
     console.error('  login:   手動ログイン（初回またはセッション切れ時）');
-    console.error('  create:  --title="..." [--body="..." | --body-file="path/to/file.md"] [--image-file="path/to/image.png"]');
+    console.error('  create:  --title="..." [--body="..." | --body-file="path/to/file.md"] [--cover-image="path/to/cover.png"] [--image-file="path/to/image.png"]');
     console.error('  edit:    --url="https://note.com/xxx/n/yyy" [--body="..." | --body-file="path/to/file.md"] [--image-file="path/to/image.png"]');
     console.error('  publish: --url="https://note.com/xxx/n/yyy"');
     console.error('  list:    [--username=naginata63]');
@@ -70,6 +70,10 @@ async function main() {
           await createDraft(page, args.title || '', '', { markdownContent: mdContent });
         } else {
           await createDraft(page, args.title || '', args.body || '');
+        }
+        if (args['cover-image']) {
+          const absPath = require('path').resolve(args['cover-image']);
+          await setCoverImage(page, absPath);
         }
         if (args['image-file']) {
           await uploadImage(page, args['image-file']);
@@ -1144,68 +1148,108 @@ async function setCoverImage(page, imagePath) {
     console.log('[cover] NOTE: CropModal未表示。直接保存します。');
   }
 
+  let clicked = false;
+
   if (cropModalVisible) {
-    // CropModal内の保存ボタンをJS経由でクリック（ReactModal__Overlayのブロック回避）
-    const okClicked = await page.evaluate(() => {
+    // [FIX-B] waitForResponseをクリック前に設定（レースコンディション修正）
+    const responsePromise = page.waitForResponse(
+      res => res.url().includes('note_eyecatch') && res.status() < 400,
+      { timeout: 30000 }
+    ).catch(() => null);
+
+    // モーダル描画完了待ち
+    await page.waitForTimeout(1000);
+
+    // [DEBUG] CropModal内の全ボタン情報をログ出力
+    const debugInfo = await page.evaluate(() => {
       const modal = document.querySelector('.CropModal__content');
-      if (!modal) return null;
-      for (const btn of modal.querySelectorAll('button')) {
-        const text = btn.textContent.trim();
-        if (['保存', 'OK', '適用', '完了', '設定する'].includes(text)) {
-          btn.click();
-          return text;
+      if (!modal) return 'NO_MODAL';
+      return Array.from(modal.querySelectorAll('button')).map(b => ({
+        text: b.textContent.trim(),
+        cls: b.className,
+        disabled: b.disabled,
+        rect: { x: Math.round(b.getBoundingClientRect().x), y: Math.round(b.getBoundingClientRect().y), w: Math.round(b.getBoundingClientRect().width), h: Math.round(b.getBoundingClientRect().height) }
+      }));
+    });
+    console.log('[cover] CropModal buttons debug:', JSON.stringify(debugInfo));
+
+    // [FIX-A] Playwrightネイティブclick（isTrusted:true）で保存ボタンをクリック
+    const modal = page.locator('.CropModal__content');
+    const buttons = modal.locator('button');
+    const count = await buttons.count();
+
+    const saveTexts = ['保存', 'OK', '適用', '完了', '設定する', '決定', '確定'];
+
+    // 1. テキスト完全一致
+    for (let i = 0; i < count && !clicked; i++) {
+      const text = ((await buttons.nth(i).textContent()) || '').trim();
+      if (saveTexts.includes(text)) {
+        console.log('[cover] Save button found by text match:', text);
+        await buttons.nth(i).click();
+        clicked = true;
+      }
+    }
+
+    // 2. キャンセルでない最後のボタン（Playwrightネイティブclick）
+    if (!clicked) {
+      for (let i = count - 1; i >= 0; i--) {
+        const text = ((await buttons.nth(i).textContent()) || '').trim();
+        if (text !== 'キャンセル' && text !== 'Cancel') {
+          console.log('[cover] Save button found by fallback (non-cancel last):', text || '(no text)');
+          await buttons.nth(i).click();
+          clicked = true;
+          break;
         }
       }
-      return null;
-    });
-    if (okClicked) {
-      console.log('[cover] CropModal保存ボタンクリック:', okClicked);
-      // アップロードAPIのレスポンス待機（カバー画像アップロード完了を確認）
-      try {
-        await page.waitForResponse(
-          res => res.url().includes('note_eyecatch') && res.status() < 400,
-          { timeout: 30000 }
-        );
-        console.log('[cover] カバー画像アップロード完了');
-      } catch (_) {
-        console.log('[cover] NOTE: アップロードレスポンス待機タイムアウト');
+    }
+
+    if (clicked) {
+      const response = await responsePromise;
+      if (response) {
+        console.log('[cover] カバー画像アップロード完了（API応答確認）');
+      } else {
+        console.log('[cover] WARNING: アップロードレスポンス待機タイムアウト（30秒）');
       }
     } else {
-      console.log('[cover] WARNING: CropModal内の保存ボタンが見つかりませんでした');
+      console.log('[cover] CRITICAL: CropModal内の保存ボタンが見つかりませんでした');
     }
+
     // CropModalが閉じるのを待つ
     try {
-      await page.waitForSelector('.CropModal__overlay', { state: 'hidden', timeout: 15000 });
+      await page.waitForSelector('.CropModal__content', { state: 'hidden', timeout: 15000 });
       console.log('[cover] CropModal閉じ確認');
     } catch (_) {
-      await page.waitForTimeout(5000);
+      console.log('[cover] WARNING: CropModalが閉じませんでした。保存ボタンのクリックが無効だった可能性あり。');
+      await page.waitForTimeout(3000);
     }
   }
 
   console.log('[cover] カバー画像を設定しました:', absPath);
 
-  // 下書き保存をJS経由でクリック（モーダルオーバーレイのブロック回避）
-  const saved = await page.evaluate(() => {
-    for (const btn of document.querySelectorAll('button')) {
-      const text = btn.textContent.trim();
-      if (text === '下書き保存' || text === '保存する') {
-        btn.click();
-        return true;
-      }
-    }
-    return false;
-  });
-  if (saved) {
+  // [FIX-C] 下書き保存もPlaywrightネイティブclick
+  const draftBtn = page.locator('button:has-text("下書き保存")').first();
+  let draftSaved = false;
+  try {
+    await draftBtn.click({ timeout: 5000 });
     await page.waitForTimeout(2000);
     console.log('[cover] 下書き保存完了');
-  } else {
-    // Ctrl+Sで保存
+    draftSaved = true;
+  } catch (_) {
+    // フォールバック: Ctrl+S
     await page.keyboard.press('Control+S');
     await page.waitForTimeout(2000);
     console.log('[cover] Ctrl+Sで保存試行');
+    draftSaved = true;
   }
 
-  return true;
+  // [FIX-D] 成功判定を厳密化
+  if (clicked && draftSaved) {
+    console.log('[cover] カバー画像設定+保存完了:', absPath);
+    return true;
+  } else {
+    console.log('[cover] WARNING: カバー画像設定に問題あり。clicked=' + clicked + ', draftSaved=' + draftSaved);
+    return false;
+  }
 }
 
 main().catch(err => {
