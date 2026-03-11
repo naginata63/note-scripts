@@ -78,6 +78,16 @@ Google AI Studioには**無料枠**がある。個人開発やプロトタイピ
 
 Agentset社のEmbeddingモデルランキング（Eloレーティング方式）で、Gemini Embedding 2は**1位（1605 Elo、勝率59.5%）**を記録。前モデルtext-embedding-004に対して80%の勝率。OpenAI text-embedding-3-largeの1563 Eloを大きく引き離している。
 
+MTEB（Massive Text Embedding Benchmark）の総合スコアでも、Gemini Embedding 2は68.17でトップ。
+
+![Embeddingモデル ベンチマーク比較（MTEB Overall Score）](/home/murakami/multi-agent-shogun/projects/note_mcp_server/articles/embedding2_benchmark.png)
+
+### 機能比較
+
+マルチモーダル対応・次元数・Matryoshka対応の一覧:
+
+![Embeddingモデル 機能比較](/home/murakami/multi-agent-shogun/projects/note_mcp_server/articles/embedding2_comparison.png)
+
 ---
 
 ## こんなのに使えそう① — 領収書の写真を撮るだけで経費を自動仕分け
