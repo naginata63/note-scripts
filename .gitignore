@@ -21,3 +21,4 @@ playwright-data/
 # ローカル設定
 selectors.md
 scripts/selectors.md
+.note_session/
