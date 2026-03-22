@@ -40,8 +40,8 @@ async function main() {
   if (!action) {
     console.error('Usage: node note-edit.js --action=<login|create|edit|publish|list> [options]');
     console.error('  login:   手動ログイン（初回またはセッション切れ時）');
-    console.error('  create:  --title="..." [--body="..." | --body-file="path/to/file.md"] [--cover-image="path/to/cover.png"] [--image-file="path/to/image.png"]');
-    console.error('  edit:    --url="https://note.com/xxx/n/yyy" [--body="..." | --body-file="path/to/file.md"] [--image-file="path/to/image.png"]');
+    console.error('  create:  --title="..." [--body="..." | --body-file="path/to/file.md"] [--cover-image="path/to/cover.png"] [--image-file="path/to/image.png"] [--hashtags="AI,YouTube,切り抜き"]');
+    console.error('  edit:    --url="https://note.com/xxx/n/yyy" [--body="..." | --body-file="path/to/file.md"] [--image-file="path/to/image.png"] [--hashtags="AI,YouTube,切り抜き"]');
     console.error('  publish: --url="https://note.com/xxx/n/yyy"');
     console.error('  list:    [--username=naginata63]');
     console.error('');
@@ -78,6 +78,9 @@ async function main() {
         if (args['image-file']) {
           await uploadImage(page, args['image-file']);
         }
+        if (args['hashtags']) {
+          await setHashtags(page, args['hashtags']);
+        }
         break;
       case 'edit':
         if (!args.url) { console.error('Error: --url is required for edit'); process.exit(1); }
@@ -94,6 +97,9 @@ async function main() {
         }
         if (args['image-file']) {
           await uploadImage(page, args['image-file']);
+        }
+        if (args['hashtags']) {
+          await setHashtags(page, args['hashtags']);
         }
         break;
       case 'publish':
@@ -413,6 +419,83 @@ async function editNote(page, url, newBody, options = {}) {
   await page.waitForTimeout(3000);
 
   console.log('[edit] 保存完了:', page.url());
+}
+
+/**
+ * setHashtags(page, hashtags)
+ * Set hashtags in the note editor's tag input panel.
+ * hashtags: comma-separated string like "AI,YouTube,切り抜き"
+ *
+ * note.com's tag input is accessible via the right-side settings panel.
+ * The panel may need to be opened by clicking a settings toggle button.
+ */
+async function setHashtags(page, hashtags) {
+  const tagList = hashtags.split(',').map(t => t.trim()).filter(t => t);
+  if (tagList.length === 0) return;
+  console.log('[hashtag] ハッシュタグ設定:', tagList);
+
+  // Selectors for the tag input field (note.com uses various layouts)
+  const tagInputSelectors = [
+    'input[placeholder*="タグ"]',
+    'input[placeholder*="ハッシュタグ"]',
+    'input[placeholder*="tag"]',
+    'input[placeholder*="Tag"]',
+  ];
+
+  // Helper: try to find tag input using given selectors
+  async function findTagInput() {
+    for (const sel of tagInputSelectors) {
+      const el = await page.$(sel);
+      if (el) return el;
+    }
+    return null;
+  }
+
+  let tagInput = await findTagInput();
+
+  // If not visible, try clicking common settings/tag panel toggle buttons
+  if (!tagInput) {
+    const panelSelectors = [
+      'button[aria-label*="タグ"]',
+      'button[aria-label*="設定"]',
+      'button:has-text("タグ")',
+      '[data-testid="tag-panel-toggle"]',
+      '.n-editor-sidebar__toggle',
+    ];
+    for (const sel of panelSelectors) {
+      try {
+        const btn = await page.$(sel);
+        if (btn) {
+          await btn.click();
+          await page.waitForTimeout(800);
+          tagInput = await findTagInput();
+          if (tagInput) break;
+        }
+      } catch (_) { /* try next */ }
+    }
+  }
+
+  if (!tagInput) {
+    console.log('[hashtag] WARNING: タグ入力フィールドが見つかりません。スキップします。');
+    return;
+  }
+
+  for (const tag of tagList) {
+    await tagInput.click();
+    await page.waitForTimeout(200);
+    await tagInput.fill(tag);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(400);
+    console.log('[hashtag] タグ追加:', tag);
+  }
+
+  // Save draft after setting hashtags
+  const saveBtn = await page.$('button:has-text("下書き保存")');
+  if (saveBtn) {
+    await saveBtn.click({ force: true });
+    await page.waitForTimeout(2000);
+    console.log('[hashtag] タグ設定後の下書き保存完了');
+  }
 }
 
 /**
@@ -836,6 +919,26 @@ async function applyMarkdownToEditor(page, markdownText) {
       if (inQuote) { await page.keyboard.press('Enter'); inQuote = false; }
       await page.keyboard.type('## ');
       await page.waitForTimeout(500); // Wait for ## input rule to fire
+      // Verify heading was applied; if not, retry with a fresh paragraph block
+      const isH2 = await page.evaluate(() => {
+        const sel = window.getSelection();
+        if (!sel || !sel.anchorNode) return false;
+        const el = sel.anchorNode.nodeType === 3 ? sel.anchorNode.parentElement : sel.anchorNode;
+        return el.closest('h2') !== null;
+      });
+      if (!isH2) {
+        console.log('[markdown] ## input rule未発火。段落を作り直してリトライ...');
+        // Remove the "## " we just typed (3 chars)
+        await page.keyboard.press('Backspace');
+        await page.keyboard.press('Backspace');
+        await page.keyboard.press('Backspace');
+        // Ensure fresh empty paragraph block before retrying
+        await page.keyboard.press('Enter');
+        await page.keyboard.press('Enter');
+        await page.waitForTimeout(200);
+        await page.keyboard.type('## ');
+        await page.waitForTimeout(500);
+      }
       await applyInlineContent(page, line.slice(3));
       await page.keyboard.press('Enter');  // Heading Enter → new paragraph (not <br>)
 
@@ -845,6 +948,25 @@ async function applyMarkdownToEditor(page, markdownText) {
       if (inQuote) { await page.keyboard.press('Enter'); inQuote = false; }
       await page.keyboard.type('### ');
       await page.waitForTimeout(500); // Wait for ### input rule to fire
+      // Verify heading was applied; if not, retry with a fresh paragraph block
+      const isH3 = await page.evaluate(() => {
+        const sel = window.getSelection();
+        if (!sel || !sel.anchorNode) return false;
+        const el = sel.anchorNode.nodeType === 3 ? sel.anchorNode.parentElement : sel.anchorNode;
+        return el.closest('h3') !== null;
+      });
+      if (!isH3) {
+        console.log('[markdown] ### input rule未発火。段落を作り直してリトライ...');
+        await page.keyboard.press('Backspace');
+        await page.keyboard.press('Backspace');
+        await page.keyboard.press('Backspace');
+        await page.keyboard.press('Backspace');
+        await page.keyboard.press('Enter');
+        await page.keyboard.press('Enter');
+        await page.waitForTimeout(200);
+        await page.keyboard.type('### ');
+        await page.waitForTimeout(500);
+      }
       await applyInlineContent(page, line.slice(4));
       await page.keyboard.press('Enter');  // Heading Enter → new paragraph
 
