@@ -7,7 +7,7 @@ const path = require('path');
 // Try multiple temp email services
 async function fetchJson(url) {
   return new Promise((resolve, reject) => {
-    const lib = url.startsWith('https') ? https : http;
+    const lib = https; // 全APIはHTTPS-only。httpブランチ削除（http未定義参照を解消）
     const req = lib.get(url, {
       headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' }
     }, (res) => {
