@@ -137,3 +137,5 @@ Playwrightの`launchPersistentContext`を使ってプロファイルディレク
 あなたもこの仕組みを試してみてほしい。OSSとして公開しているので、フォークして自分のAIエージェントと連携させることができる。
 
 https://github.com/naginata63/note-scripts
+
+#AI #自動化 #個人開発 #note #AIエージェント
