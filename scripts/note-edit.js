@@ -24,6 +24,7 @@ const { chromium } = require('@playwright/test');
 const fs = require('fs');
 
 // CLI専用プロファイル（Playwright MCP serverのnote-profileと競合しない）
+// デフォルトは固定パス。別環境で使う場合は環境変数 NOTE_PROFILE_DIR でoverride可能
 const USER_DATA_DIR = process.env.NOTE_PROFILE_DIR || '/home/murakami/.cache/ms-playwright/note-cli-profile';
 
 // Parse CLI arguments: --key=value or --flag

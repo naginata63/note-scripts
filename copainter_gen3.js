@@ -5,8 +5,10 @@ const os = require('os');
 
 const CREDS_PATH = path.join(os.homedir(), '.config', 'copainter', 'creds.json');
 const CREDS = JSON.parse(fs.readFileSync(CREDS_PATH));
-const OUTPUT_DIR = '/home/murakami/multi-agent-shogun/projects/dozle_kirinuki/assets/dozle_jp/character/expressions/copainter';
-const CHAR_DIR = '/home/murakami/multi-agent-shogun/projects/dozle_kirinuki/assets/dozle_jp/character';
+// アセットベースディレクトリ。環境変数 DOZLE_KIRINUKI_DIR でoverride可能
+const BASE_DIR = process.env.DOZLE_KIRINUKI_DIR || '/home/murakami/multi-agent-shogun/projects/dozle_kirinuki';
+const OUTPUT_DIR = path.join(BASE_DIR, 'assets/dozle_jp/character/expressions/copainter');
+const CHAR_DIR = path.join(BASE_DIR, 'assets/dozle_jp/character');
 
 fs.mkdirSync(OUTPUT_DIR, { recursive: true });
 

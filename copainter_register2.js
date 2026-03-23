@@ -1,7 +1,6 @@
 require('dotenv').config();
 const { chromium } = require('playwright');
 const https = require('https');
-const http = require('http');
 const os = require('os');
 const path = require('path');
 
